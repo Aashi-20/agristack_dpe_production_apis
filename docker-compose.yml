@@ -1,0 +1,55 @@
+# Runs on the app VM itself. Kafka (3 external VMs) and ClickHouse (3
+# external VMs) are NOT here -- this only starts what needs to live on
+# THIS machine: the app (as three separate processes) and a local Redis.
+#
+# IMPORTANT: from inside a container, "localhost" means the container
+# itself, not the host machine or a sibling container. That's why
+# REDIS_URL below uses the service name "redis", not "localhost" --
+# Docker's internal networking resolves service names automatically for
+# containers on the same compose file.
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: agristack-redis
+    restart: unless-stopped
+    # No ports: published to the host -- nothing outside this VM's Docker
+    # network needs to reach Redis directly.
+
+  app:
+    build: .
+    container_name: agristack-app
+    restart: unless-stopped
+    ports:
+      - "4000:4000"   # match whatever PORT is set to in .env below
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+
+  consumer:
+    build: .
+    container_name: agristack-consumer
+    restart: unless-stopped
+    command: ["node", "src/kafka/consumerRunner.js"]
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+
+  telemetry-consumer:
+    build: .
+    container_name: agristack-telemetry-consumer
+    restart: unless-stopped
+    command: ["node", "src/telemetry/consumerRunner.js"]
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
