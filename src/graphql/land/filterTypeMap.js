@@ -1,0 +1,18 @@
+module.exports = {
+  frCentralId: 'String',
+  plotArea: 'Float64',
+  fprLandType: 'String',
+  plotStateLgdCode: 'Int64',
+  plotStateName: 'String',
+  plotVillageLgdCode: 'Int32',
+  plotVillageName: 'String',
+  plotDistrictLgdCode: 'Int64',
+  plotDistrictName: 'String',
+  plotSubDistrictLgdCode: 'Int64',
+  plotSubDistrictName: 'String',
+  isJointOwnership: 'UInt8',
+  ownerType: 'String',
+  ownershipShareType: 'String',
+  tenureType: 'String',
+  jointOwnershipShareType: 'String',
+};
