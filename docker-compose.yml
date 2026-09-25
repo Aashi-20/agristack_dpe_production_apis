@@ -18,7 +18,7 @@ services:
     # network needs to reach Redis directly.
 
   app:
-    build: .
+    image: agristack-dpe-apis:1.0.0
     container_name: agristack-app
     restart: unless-stopped
     ports:
@@ -31,7 +31,7 @@ services:
       - redis
 
   consumer:
-    build: .
+    image: agristack-dpe-apis:1.0.0
     container_name: agristack-consumer
     restart: unless-stopped
     command: ["node", "src/kafka/consumerRunner.js"]
@@ -43,7 +43,7 @@ services:
       - redis
 
   telemetry-consumer:
-    build: .
+    image: agristack-dpe-apis:1.0.0
     container_name: agristack-telemetry-consumer
     restart: unless-stopped
     command: ["node", "src/telemetry/consumerRunner.js"]
