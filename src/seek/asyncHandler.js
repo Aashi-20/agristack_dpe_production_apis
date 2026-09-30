@@ -3,6 +3,7 @@ const { resolveAndPublishSeek } = require('../telemetry/resolveAndPublish');
 const { publishSeekRequest } = require('../kafka/producer');
 const { isDuplicateTransaction } = require('../orchestrator/transactionDedup');
 const { sendError } = require('../utils/apiError');
+const { validateRequestHeader } = require('../utils/validateRequestHeader');
 
 // v1: asynchronous.
 //
@@ -20,6 +21,10 @@ async function handleAsyncSeek(req, res) {
   const { header, message } = req.body;
   const transactionId = message?.transaction_id;
 
+  const headerError = validateRequestHeader(header);
+  if (headerError) {
+    return sendError(res, 400, headerError.code, headerError.message);
+  }
   if (!header?.sender_uri) {
     return sendError(res, 400, 'MISSING_SENDER_URI', 'header.sender_uri is required for the asynchronous (v1) seek API');
   }

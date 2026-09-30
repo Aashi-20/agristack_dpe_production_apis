@@ -613,3 +613,30 @@ and `504` aren't produced anywhere yet, since no current code path has a
 scenario for "unsupported operation" or "upstream timeout" -- happy to wire
 either in if you have a specific case in mind (e.g. a timeout on the
 internal GraphQL/introspect calls mapping to 504).
+
+## Central gateway (APISIX) door
+
+An AIU can reach a state's data two ways:
+
+| Door | URL on the state app | Who calls it | Credentials | Encryption |
+|---|---|---|---|---|
+| Direct | `POST /dpe/v2/seek` | the AIU | UFSI token | follows `USE_RESPONSE_ENCRYPTION` |
+| Gateway | `POST /dpe/internal/v2/seek` | the central APISIX | `X-API-Key` **and** the AIU's UFSI token | always on |
+
+Through the gateway the AIU calls the central APISIX at `/dpe/v2/seek` with an
+extra header, `X-State-LGD-Code: <state LGD code>`. APISIX picks that state's
+upstream, rewrites the path to `/dpe/internal/v2/seek`, and adds the state's
+API key. The UFSI token is forwarded unchanged and verified by the state app
+exactly as on the direct door, so the link between a token and its `sender_id`
+stays with the state that owns the data.
+
+Config (see `.env.example`): `GATEWAY_API_KEYS` (empty = door not registered),
+`STATE_LGD_CODE`, `GRAPHQL_LOCAL_ONLY`.
+
+Gateway-door errors: `401 MISSING_API_KEY`, `401 INVALID_API_KEY`,
+`400 MISSING_STATE_CODE`, `400 STATE_MISMATCH`. Everything after those checks
+behaves like the direct door. Telemetry's `api_endpoint` records which door a
+request used.
+
+`/graphql/*` accepts loopback callers only (`403 INTERNAL_ONLY` otherwise),
+because those endpoints return whole tables and have no auth of their own.

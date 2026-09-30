@@ -30,7 +30,9 @@ const landOwnershipTypeDefs = require('./graphql/landOwnership/typeDefs');
 const landOwnershipResolvers = require('./graphql/landOwnership/resolvers');
 
 const { verifyToken } = require('./auth/verifyTokenMiddleware');
-const { handleSyncSeek } = require('./seek/syncHandler');
+const { verifyGatewayKey, verifyGatewayState } = require('./auth/verifyGatewayKey');
+const { localOnly } = require('./auth/localOnly');
+const { handleSyncSeek, handleGatewaySyncSeek } = require('./seek/syncHandler');
 const { handleAsyncSeek } = require('./seek/asyncHandler');
 const { sendError } = require('./utils/apiError');
 
@@ -47,16 +49,37 @@ async function startServer() {
 
   await Promise.all([demographicServer.start(), landServer.start(), landOwnershipServer.start()]);
 
-  app.use('/graphql/demographic', expressMiddleware(demographicServer));
-  app.use('/graphql/land', expressMiddleware(landServer));
-  app.use('/graphql/land-ownership', expressMiddleware(landOwnershipServer));
+  // These have no auth of their own and return whole tables, so they are
+  // reachable only from this app itself (localOnly.js) -- the orchestrator
+  // calls them over 127.0.0.1. Without this, anyone who can reach this
+  // port could read them directly and skip every check in the seek APIs.
+  app.use('/graphql/demographic', localOnly, expressMiddleware(demographicServer));
+  app.use('/graphql/land', localOnly, expressMiddleware(landServer));
+  app.use('/graphql/land-ownership', localOnly, expressMiddleware(landOwnershipServer));
 
   // Real, authenticated Data Sharing API. Shortened from the original
   // /agristack-data-provisioning-engine/v{n}/api/assetIdentification/seek
   // to /dpe/v{n}/seek -- same auth, same behavior, just a shorter path.
   // verifyToken runs first on both versions.
   app.post(`${SEEK_BASE}/v1/seek`, verifyToken, handleAsyncSeek);  // async
-  app.post(`${SEEK_BASE}/v2/seek`, verifyToken, handleSyncSeek);   // sync
+  app.post(`${SEEK_BASE}/v2/seek`, verifyToken, handleSyncSeek);   // sync (direct door)
+
+  // Gateway door for the sync API: the central APISIX routes an AIU's
+  // request here and adds this state's API key. Checks run cheapest-first:
+  // API key, then "is this really meant for my state", then the AIU's own
+  // UFSI token exactly as on the direct door. Encryption is always on.
+  // Only registered when GATEWAY_API_KEYS is set, so a state that hasn't
+  // been connected to the gateway simply doesn't have this endpoint.
+  const gatewayEnabled = (process.env.GATEWAY_API_KEYS || '').split(',').some((k) => k.trim());
+  if (gatewayEnabled) {
+    app.post(
+      `${SEEK_BASE}/internal/v2/seek`,
+      verifyGatewayKey,
+      verifyGatewayState,
+      verifyToken,
+      handleGatewaySyncSeek
+    );
+  }
 
   // Catch-all 404, in the same standard error envelope as every other
   // response -- without this, an unmatched route falls through to
@@ -95,6 +118,12 @@ async function startServer() {
     console.log(`  Land Ownership GraphQL: http://localhost:${PORT}/graphql/land-ownership`);
     console.log(`  Seek v1 (async, auth):  POST http://localhost:${PORT}${SEEK_BASE}/v1/seek`);
     console.log(`  Seek v2 (sync, auth):   POST http://localhost:${PORT}${SEEK_BASE}/v2/seek`);
+    console.log(gatewayEnabled
+      ? `  Seek v2 (gateway):      POST http://localhost:${PORT}${SEEK_BASE}/internal/v2/seek  (API key required, encryption always on, state LGD check: ${process.env.STATE_LGD_CODE ? process.env.STATE_LGD_CODE : 'OFF -- STATE_LGD_CODE not set'})`
+      : '  Seek v2 (gateway):      DISABLED (GATEWAY_API_KEYS not set -- endpoint not registered)');
+    console.log(process.env.GRAPHQL_LOCAL_ONLY === 'false'
+      ? '  [security] GraphQL endpoints are OPEN to external callers (GRAPHQL_LOCAL_ONLY=false).'
+      : '  GraphQL endpoints: local-only (blocked for external callers)');
   });
 }
 

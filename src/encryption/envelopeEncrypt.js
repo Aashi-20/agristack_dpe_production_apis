@@ -1,13 +1,58 @@
 const crypto = require('crypto');
 
-// Accepts either a full PEM (with BEGIN/END markers, what's actually stored
-// in aiu_public_key) or a bare base64 blob (same convention as
-// verifyJwtLocally.js's NM_PUBLIC_KEY handling), and returns proper PEM.
+// The correct, minimal way to send a public key here is: the PEM content
+// lines only (no BEGIN/END markers), joined into ONE unbroken base64
+// string (the internal newlines in a .pem file only exist for that
+// format's 64-char line wrapping -- they carry no meaning and don't need
+// to be reproduced). That single string, base64-decoded exactly once,
+// yields the raw DER bytes.
+//
+// In practice callers also send it a few other ways, so this accepts all
+// of them by trying to unwrap up to two extra encoding layers, checking
+// after each one whether what's left is real PEM text or plausible base64
+// text (as opposed to binary DER, which is where genuine content lives and
+// where unwrapping must stop):
+//   1. Already a full PEM, with BEGIN/END markers -- used as-is.
+//   2. The correct minimal form above -- one clean base64 string, decodes
+//      directly to binary DER. No layers to unwrap; markers just get added.
+//   3. Base64 of the ENTIRE PEM text, markers included -- decoding once
+//      reveals real PEM text (contains "BEGIN PUBLIC KEY").
+//   4. Base64 of the content lines WITH their internal newlines, encoded a
+//      second time by mistake -- decoding once reveals text that is itself
+//      still base64 (not binary), so it gets decoded again before use.
+// Whichever of these produced the ASN.1 "wrong tag" error before, all four
+// now resolve to the same valid key.
+function looksLikeBase64Text(s) {
+  return /^[A-Za-z0-9+/=\s]+$/.test(s) && s.replace(/\s+/g, '').length > 20;
+}
+
 function toPemPublicKey(raw) {
-  if (raw.includes('BEGIN PUBLIC KEY')) return raw;
-  const cleaned = raw.replace(/\s+/g, '');
+  let current = raw.trim();
+
+  for (let layer = 0; layer < 2; layer++) {
+    if (current.includes('BEGIN PUBLIC KEY')) return current; // case 1 or 3, mid-unwrap
+
+    let decodedText;
+    try {
+      decodedText = Buffer.from(current, 'base64').toString('utf8');
+    } catch {
+      break; // not valid base64 at all -- stop unwrapping
+    }
+
+    if (decodedText.includes('BEGIN PUBLIC KEY')) return decodedText; // case 3
+
+    if (looksLikeBase64Text(decodedText) && decodedText.trim() !== current) {
+      current = decodedText.trim(); // case 4: one more encoding layer to peel off
+      continue;
+    }
+    break; // decoded to binary DER (or garbage) -- this is the real content, stop
+  }
+
+  if (current.includes('BEGIN PUBLIC KEY')) return current;
+
+  const cleaned = current.replace(/\s+/g, '');
   const lines = cleaned.match(/.{1,64}/g) || [];
-  return `-----BEGIN PUBLIC KEY-----\n${lines.join('\n')}\n-----END PUBLIC KEY-----\n`;
+  return `-----BEGIN PUBLIC KEY-----\n${lines.join('\n')}\n-----END PUBLIC KEY-----\n`; // case 2
 }
 
 // Envelope-encrypts a JS value for one specific AIU's public key:

@@ -1,6 +1,6 @@
 {
   "name": "agristack-graphql",
-  "version": "1.0.0",
+  "version": "1.2.4",
   "description": "Per-profile GraphQL APIs + orchestrator for AgriStack Data Sharing API",
   "main": "src/index.js",
   "scripts": {

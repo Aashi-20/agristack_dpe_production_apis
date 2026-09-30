@@ -26,25 +26,29 @@ function buildFlatAttributeList(config) {
 // earlier version of this function that read an almost-never-sent
 // seek_request.purpose_code and defaulted to 'UNSPECIFIED' for nearly
 // every real request.
-function buildSeekProcessedEvent({ requestBody, apiMode, apiEndpoint, requestId, httpStatus, body, durationMs, config }) {
+function buildSeekProcessedEvent({ requestBody, apiMode, apiEndpoint, requestId, httpStatus, body, durationMs, config, auditMeta }) {
   const { header, message } = requestBody;
   const seekResponse = body?.message?.seek_response || [];
 
-  const farmerIds = seekResponse.map((item) => item.farmerData?.frCentralId).filter(Boolean);
-  const recordCount = seekResponse.reduce(
-    (sum, item) => sum + 1 + (item.landData?.length || 0) + (item.landOwnershipData?.length || 0),
-    0
-  );
-  const attributeList = buildFlatAttributeList(config);
+  // auditMeta, when present, comes from a resolver other than
+  // resolveSeekResponse.js (currently: resolveSdjwtSeek.js) that doesn't
+  // produce a seek_response array at all. Without this override, the audit
+  // trail would show zero farmers/records shared for a response that in
+  // fact delivered a real credential containing real farmer PII.
+  const farmerIds = auditMeta?.farmerIds
+    ?? seekResponse.map((item) => item.farmerData?.frCentralId).filter(Boolean);
+  const recordCount = auditMeta?.recordCount
+    ?? seekResponse.reduce((sum, item) => sum + 1 + (item.landData?.length || 0) + (item.landOwnershipData?.length || 0), 0);
+  const attributeList = auditMeta?.sharedData ?? buildFlatAttributeList(config);
 
   // Full per-farmer payload actually returned (real values, not just field
   // names) -- this is what lets a specific transaction's disclosure be
   // fully reconstructed later. Contains real farmer PII; see the comment
   // above farmer_data_sharing_log's sharedPayload column in
   // clickhouse/telemetry_tables.sql for the handling implications.
-  const farmerPayloads = seekResponse
-    .filter((item) => item.farmerData?.frCentralId)
-    .map((item) => ({ frCentralId: item.farmerData.frCentralId, payload: item }));
+  const farmerPayloads = auditMeta?.farmerPayloads
+    ?? seekResponse.filter((item) => item.farmerData?.frCentralId)
+      .map((item) => ({ frCentralId: item.farmerData.frCentralId, payload: item }));
 
   const isSuccess = httpStatus === 200;
 
